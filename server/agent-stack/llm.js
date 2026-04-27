@@ -209,9 +209,11 @@ async function callOpenCodeMCP(systemPrompt, userPrompt) {
 
       if (mySession.status === 'completed' || mySession.status === 'failed') {
         isDone = true;
-        finalResult = mySession.status === 'completed' 
-          ? `[OpenCode] Task completed successfully.`
-          : `[OpenCode] Task failed during execution.`;
+        const outputContent = mySession.output && mySession.output.trim() !== '' 
+          ? mySession.output 
+          : (mySession.status === 'completed' ? `[OpenCode] Task completed successfully.` : `[OpenCode] Task failed during execution.`);
+        
+        finalResult = outputContent;
       } else if (mySession.status === 'input_required') {
         await client.callTool({
           name: 'opencode_respond',
