@@ -56,7 +56,7 @@ async function callLLM(systemPrompt, userPrompt, providerOverride) {
         return await callCLI('gemini', `${systemPrompt}\n\n${userPrompt}`);
 
       case 'opencode-cli':
-        return await callCLI('opencode', `${systemPrompt}\n\n${userPrompt}`, '--prompt');
+        return await callOpenCodeMCP(systemPrompt, userPrompt);
 
       default:
         throw new Error(`Unknown provider: ${provider}`);
@@ -153,6 +153,80 @@ async function callCLI(cmd, prompt, flag = '') {
   const { stdout, stderr } = await execPromise(execCmd);
   if (stderr && !stdout) throw new Error(`${cmd} CLI Error: ${stderr}`);
   return stdout.trim();
+}
+
+async function callOpenCodeMCP(systemPrompt, userPrompt) {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const path = require('path');
+
+  const transport = new StdioClientTransport({
+    command: 'node',
+    args: [path.join(__dirname, '../tools/Better-OpenCodeMCP/dist/index.js')]
+  });
+
+  const client = new Client(
+    { name: 'designedbycommitee', version: '1.0.0' },
+    { capabilities: {} }
+  );
+
+  await client.connect(transport);
+
+  try {
+    const taskResult = await client.callTool({
+      name: 'opencode',
+      arguments: {
+        task: `${systemPrompt}\n\n${userPrompt}`,
+        agent: 'build',
+        sessionTitle: 'Committee Debate'
+      }
+    });
+
+    if (taskResult.isError) {
+      throw new Error(`OpenCode MCP task failed to start: ${JSON.stringify(taskResult.content)}`);
+    }
+
+    const { taskId } = JSON.parse(taskResult.content[0].text);
+    console.log(`[LLM-OpenCode] Started background task ${taskId}`);
+
+    let isDone = false;
+    let finalResult = null;
+    let attempts = 0;
+
+    while (!isDone && attempts < 30) {
+      await new Promise(r => setTimeout(r, 2000));
+      attempts++;
+
+      const sessionsResult = await client.callTool({
+        name: 'opencode_sessions',
+        arguments: { status: 'all', limit: 10 }
+      });
+
+      const { sessions } = JSON.parse(sessionsResult.content[0].text);
+      const mySession = sessions.find(s => s.taskId === taskId);
+      
+      if (!mySession) continue;
+
+      if (mySession.status === 'completed' || mySession.status === 'failed') {
+        isDone = true;
+        finalResult = mySession.status === 'completed' 
+          ? `[OpenCode] Task completed successfully.`
+          : `[OpenCode] Task failed during execution.`;
+      } else if (mySession.status === 'input_required') {
+        await client.callTool({
+          name: 'opencode_respond',
+          arguments: { taskId, response: "Please proceed using your best judgment." }
+        });
+      }
+    }
+    
+    return finalResult || `[OpenCode] Task ${taskId} timed out after 60s.`;
+  } catch (err) {
+    console.error('[LLM-OpenCode] Error:', err);
+    return `[OpenCode] Error: ${err.message}`;
+  } finally {
+    await transport.close();
+  }
 }
 
 module.exports = { callLLM };
