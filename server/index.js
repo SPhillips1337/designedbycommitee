@@ -1,3 +1,6 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -27,8 +30,11 @@ let activeUsers = new Set();
 wss.on('connection', (ws) => {
   console.log('Client connected');
   
+  // Get active AI members to display in UI
+  const aiMembers = aiManager.getActiveMembers();
+  
   // Send initial state
-  ws.send(JSON.stringify({ type: 'init', state: designState, messages }));
+  ws.send(JSON.stringify({ type: 'init', state: designState, messages, aiMembers }));
 
   ws.on('message', (message) => {
     try {
@@ -37,7 +43,9 @@ wss.on('connection', (ws) => {
       switch (data.type) {
         case 'user_join':
           activeUsers.add(data.userId);
-          broadcast({ type: 'presence', users: Array.from(activeUsers) });
+          broadcast({ type: 'presence', users: Array.from(activeUsers), aiMembers });
+          // Proactive welcome from the AI Architect
+          aiManager.broadcastProactiveMessage(`Welcome to the committee, ${data.userId}. I am the AI Architect. I'll be monitoring our design tokens to ensure we stay within the Luminous Obsidian guidelines.`);
           break;
           
         case 'update_design':
@@ -66,6 +74,9 @@ wss.on('connection', (ws) => {
           };
           messages.push(chatMsg);
           broadcast({ type: 'new_message', message: chatMsg });
+          
+          // Trigger the LLM committee to respond!
+          aiManager.handleCommitteeChat(data.text, data.userId);
           break;
       }
     } catch (err) {
@@ -87,7 +98,11 @@ function broadcast(data) {
   });
 }
 
+wss.on('error', (err) => {
+  console.error('WebSocket Server Error:', err);
+});
+
 const PORT = process.env.PORT || 4002;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT} (0.0.0.0)`);
 });

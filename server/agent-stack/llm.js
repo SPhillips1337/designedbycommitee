@@ -1,5 +1,4 @@
 // Advanced LLM provider supporting multiple API and CLI backends
-require('dotenv').config();
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
@@ -57,7 +56,7 @@ async function callLLM(systemPrompt, userPrompt, providerOverride) {
         return await callCLI('gemini', `${systemPrompt}\n\n${userPrompt}`);
 
       case 'opencode-cli':
-        return await callCLI('opencode', `${systemPrompt}\n\n${userPrompt}`);
+        return await callCLI('opencode', `${systemPrompt}\n\n${userPrompt}`, '--prompt');
 
       default:
         throw new Error(`Unknown provider: ${provider}`);
@@ -147,10 +146,11 @@ async function callAnthropicAPI(systemPrompt, userPrompt) {
   return data.content[0].text;
 }
 
-async function callCLI(cmd, prompt) {
+async function callCLI(cmd, prompt, flag = '') {
   // Escaping single quotes for bash
   const escapedPrompt = prompt.replace(/'/g, "'\\''");
-  const { stdout, stderr } = await execPromise(`${cmd} '${escapedPrompt}'`);
+  const execCmd = flag ? `${cmd} ${flag} '${escapedPrompt}'` : `${cmd} '${escapedPrompt}'`;
+  const { stdout, stderr } = await execPromise(execCmd);
   if (stderr && !stdout) throw new Error(`${cmd} CLI Error: ${stderr}`);
   return stdout.trim();
 }
