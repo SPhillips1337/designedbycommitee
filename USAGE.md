@@ -56,3 +56,7 @@ npm run dev
 - **Frontend**: React + Vite using CSS variables mapped to the "Luminous Obsidian" design system.
 - **Backend**: Node.js WebSocket server (`server/index.js`).
 - **Agent Stack**: Located in `server/agent-stack/`. Features a decoupled `ManagerAgent` and individual `skills` for evaluating design choices.
+- **LLM Providers**: The system supports multiple backends (configured in `.env`):
+  - **Local/Remote**: OpenAI-compatible (LM Studio, Ollama).
+  - **Cloud APIs**: Native support for Gemini, OpenAI, OpenRouter, and Anthropic.
+  - **Local CLIs**: Support for running `gemini` or `opencode` CLI tools directly.

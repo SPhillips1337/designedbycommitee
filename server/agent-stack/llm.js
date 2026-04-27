@@ -1,50 +1,158 @@
-// Simple LLM provider supporting multiple endpoints (LM Studio, Cloudflare + Ollama)
+// Advanced LLM provider supporting multiple API and CLI backends
 require('dotenv').config();
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
-async function callLLM(systemPrompt, userPrompt, provider = 'local') {
-  // Select configuration based on the requested provider
-  const isRemote = provider === 'remote';
-  const apiBase = isRemote 
-    ? (process.env.REMOTE_LLM_API_BASE || 'https://your-tunnel.trycloudflare.com/v1')
-    : (process.env.LOCAL_LLM_API_BASE || 'http://localhost:1234/v1');
-    
-  const apiKey = isRemote 
-    ? (process.env.REMOTE_OPENAI_API_KEY || 'ollama')
-    : (process.env.LOCAL_OPENAI_API_KEY || 'lm-studio');
-    
-  const model = isRemote 
-    ? (process.env.REMOTE_LLM_MODEL || 'llama3')
-    : (process.env.LOCAL_LLM_MODEL || 'local-model');
+async function callLLM(systemPrompt, userPrompt, providerOverride) {
+  const provider = providerOverride || process.env.ACTIVE_LLM_PROVIDER || 'local';
+  console.log(`[LLM] Calling provider: ${provider}`);
 
   try {
-    const response = await fetch(`${apiBase}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.2
-      })
-    });
+    switch (provider) {
+      case 'local':
+        return await callOpenAICompatible(
+          process.env.LOCAL_LLM_API_BASE || 'http://localhost:1234/v1',
+          process.env.LOCAL_OPENAI_API_KEY || 'lm-studio',
+          process.env.LOCAL_LLM_MODEL || 'local-model',
+          systemPrompt,
+          userPrompt
+        );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`LLM Error [${provider}]: ${response.status} - ${errText}`);
+      case 'remote':
+        return await callOpenAICompatible(
+          process.env.REMOTE_LLM_API_BASE,
+          process.env.REMOTE_OPENAI_API_KEY || 'ollama',
+          process.env.REMOTE_LLM_MODEL || 'llama3',
+          systemPrompt,
+          userPrompt
+        );
+
+      case 'openai':
+        return await callOpenAICompatible(
+          'https://api.openai.com/v1',
+          process.env.OPENAI_API_KEY,
+          process.env.OPENAI_MODEL || 'gpt-4o',
+          systemPrompt,
+          userPrompt
+        );
+
+      case 'openrouter':
+        return await callOpenAICompatible(
+          'https://openrouter.ai/api/v1',
+          process.env.OPENROUTER_API_KEY,
+          process.env.OPENROUTER_MODEL || 'anthropic/claude-3-sonnet',
+          systemPrompt,
+          userPrompt,
+          { "HTTP-Referer": "https://designedbycommittee.ai", "X-Title": "DesignedByCommittee" }
+        );
+
+      case 'gemini':
+        return await callGeminiAPI(systemPrompt, userPrompt);
+
+      case 'anthropic':
+        return await callAnthropicAPI(systemPrompt, userPrompt);
+
+      case 'gemini-cli':
+        return await callCLI('gemini', `${systemPrompt}\n\n${userPrompt}`);
+
+      case 'opencode-cli':
+        return await callCLI('opencode', `${systemPrompt}\n\n${userPrompt}`);
+
+      default:
+        throw new Error(`Unknown provider: ${provider}`);
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content;
-    
   } catch (error) {
-    console.error(`LLM Provider (${provider}) failed:`, error);
+    console.error(`LLM Provider (${provider}) failed:`, error.message);
     return null;
   }
+}
+
+async function callOpenAICompatible(baseUrl, apiKey, model, systemPrompt, userPrompt, extraHeaders = {}) {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      ...extraHeaders
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.2
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenAI-Compat Error: ${response.status} - ${err}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function callGeminiAPI(systemPrompt, userPrompt) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Gemini API Error: ${response.status} - ${err}`);
+  }
+
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
+async function callAnthropicAPI(systemPrompt, userPrompt) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620';
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Anthropic Error: ${response.status} - ${err}`);
+  }
+
+  const data = await response.json();
+  return data.content[0].text;
+}
+
+async function callCLI(cmd, prompt) {
+  // Escaping single quotes for bash
+  const escapedPrompt = prompt.replace(/'/g, "'\\''");
+  const { stdout, stderr } = await execPromise(`${cmd} '${escapedPrompt}'`);
+  if (stderr && !stdout) throw new Error(`${cmd} CLI Error: ${stderr}`);
+  return stdout.trim();
 }
 
 module.exports = { callLLM };
