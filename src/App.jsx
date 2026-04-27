@@ -11,6 +11,12 @@ function App() {
   const [comment, setComment] = useState('');
   const [userId] = useState(`user_${Math.floor(Math.random() * 1000)}`);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newItemText, setNewItemText] = useState('');
+  const [activeTab, setActiveTab] = useState('requirements');
 
   const socketRef = useRef(null);
 
@@ -35,6 +41,17 @@ function App() {
           setPrimaryColor(data.state.primaryColor);
           setMessages(data.messages);
           if (data.aiMembers) setAiMembers(data.aiMembers);
+          if (data.projects) {
+            setProjects(data.projects);
+            if (data.projects.length > 0 && !activeProjectId) {
+              setActiveProjectId(data.projects[data.projects.length - 1].id);
+            }
+          }
+        } else if (data.type === 'project_updated') {
+          setProjects(data.projects);
+          if (data.project && !activeProjectId) {
+            setActiveProjectId(data.project.id);
+          }
         } else if (data.type === 'state_update') {
           setBorderRadius(data.state.borderRadius);
           setPrimaryColor(data.state.primaryColor);
@@ -103,6 +120,54 @@ function App() {
       setIsLoginModalOpen(false);
     }
   };
+
+  const handleCreateProject = () => {
+    if (newProjectName.trim() && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'create_project',
+        userId,
+        name: newProjectName
+      }));
+      setNewProjectName('');
+    }
+  };
+
+  const handleAddItem = (phase) => {
+    if (newItemText.trim() && activeProjectId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'add_project_item',
+        userId,
+        projectId: activeProjectId,
+        phase,
+        text: newItemText
+      }));
+      setNewItemText('');
+    }
+  };
+
+  const handleSignOff = (phase, itemId) => {
+    if (activeProjectId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'sign_off_item',
+        userId,
+        projectId: activeProjectId,
+        phase,
+        itemId
+      }));
+    }
+  };
+
+  const handlePromotePhase = () => {
+    if (activeProjectId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'promote_phase',
+        userId,
+        projectId: activeProjectId
+      }));
+    }
+  };
+
+  const activeProject = projects.find(p => p.id === activeProjectId);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: 'var(--radius-md)', position: 'relative' }}>
@@ -244,50 +309,136 @@ function App() {
           </div>
         </main>
 
-        {/* Sidebar: Voting */}
+        {/* Sidebar: Project Tracker */}
         <aside style={{ 
           flex: 1, 
           display: 'flex', flexDirection: 'column', gap: '24px',
           overflowY: 'auto'
         }}>
-          {/* Voting Widget */}
-          <section className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '24px', color: 'var(--primary)' }}>Live Voting</h3>
+          <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 0, color: 'var(--primary)' }}>Project Tracker</h3>
             
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <label style={{ fontSize: '0.9rem' }}>Border Radius</label>
-                <span style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>{borderRadius}px</span>
-              </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
               <input 
-                type="range" 
-                min="0" max="48" 
-                value={borderRadius} 
-                onChange={(e) => updateDesign({ borderRadius: Number(e.target.value) })}
-                style={{ width: '100%', accentColor: 'var(--primary)' }}
+                type="text" 
+                placeholder="New project name..." 
+                className="recessed-input" 
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                style={{ flex: 1 }}
               />
+              <button className="btn-primary" onClick={handleCreateProject}>Create</button>
             </div>
 
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <label style={{ fontSize: '0.9rem' }}>Primary Accent</label>
-                <span style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>{primaryColor}</span>
+            {projects.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)' }}>Active Project:</span>
+                <select 
+                  value={activeProjectId || ''} 
+                  onChange={(e) => {
+                    setActiveProjectId(e.target.value);
+                    setActiveTab(projects.find(p => p.id === e.target.value)?.status || 'requirements');
+                  }}
+                  className="recessed-input"
+                  style={{ flex: 1, padding: '8px' }}
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
+                  ))}
+                </select>
               </div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                {['#A3A6FF', '#FFA5D9', '#FF6E84', '#6063EE'].map(color => (
+            )}
+
+            {activeProject && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '8px' }}>
+                <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--surface-container-highest)' }}>
+                  {['requirements', 'tasks', 'todos'].map(tab => (
+                    <button 
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      style={{ 
+                        flex: 1, 
+                        background: 'none', 
+                        border: 'none', 
+                        padding: '8px', 
+                        cursor: 'pointer',
+                        color: activeTab === tab ? 'var(--primary)' : 'var(--on-surface-variant)',
+                        borderBottom: activeTab === tab ? '2px solid var(--primary)' : '2px solid transparent',
+                        fontWeight: activeTab === tab ? 'bold' : 'normal',
+                        textTransform: 'capitalize'
+                      }}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {activeProject[activeTab].map(item => (
+                    <div key={item.id} style={{ 
+                      display: 'flex', alignItems: 'center', gap: '12px', 
+                      padding: '12px', 
+                      backgroundColor: 'var(--surface-container-low)', 
+                      borderRadius: 'var(--radius-sm)'
+                    }}>
+                      <input 
+                        type="checkbox" 
+                        checked={item.signedOff} 
+                        onChange={() => handleSignOff(activeTab, item.id)}
+                        style={{ width: '18px', height: '18px', accentColor: 'var(--primary)' }}
+                      />
+                      <span style={{ 
+                        flex: 1, 
+                        fontSize: '0.9rem',
+                        textDecoration: item.signedOff ? 'line-through' : 'none',
+                        color: item.signedOff ? 'var(--on-surface-variant)' : 'var(--on-surface)'
+                      }}>
+                        {item.text}
+                      </span>
+                      {activeTab === 'todos' && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--tertiary)' }}>[{item.status}]</span>
+                      )}
+                    </div>
+                  ))}
+                  {activeProject[activeTab].length === 0 && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)', textAlign: 'center', padding: '16px 0' }}>
+                      No items yet.
+                    </div>
+                  )}
+                </div>
+
+                {activeProject.status === activeTab && (
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                    <input 
+                      type="text" 
+                      placeholder={`Add new ${activeTab.slice(0, -1)}...`} 
+                      className="recessed-input" 
+                      value={newItemText}
+                      onChange={(e) => setNewItemText(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleAddItem(activeTab)}
+                      style={{ flex: 1, fontSize: '0.9rem' }}
+                    />
+                    <button 
+                      className="btn-primary" 
+                      onClick={() => handleAddItem(activeTab)}
+                      style={{ padding: '8px 16px', fontSize: '0.9rem' }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
+
+                {activeProject.status === activeTab && activeProject[activeTab].length > 0 && activeProject[activeTab].every(i => i.signedOff) && (
                   <button 
-                    key={color}
-                    onClick={() => updateDesign({ primaryColor: color })}
-                    style={{ 
-                      width: '40px', height: '40px', borderRadius: '50%',
-                      backgroundColor: color, border: 'none', cursor: 'pointer',
-                      boxShadow: primaryColor === color ? '0 0 0 2px var(--surface), 0 0 0 4px var(--on-surface)' : 'none',
-                      transition: 'all 0.2s ease'
-                    }}
-                  />
-                ))}
+                    className="btn-primary" 
+                    onClick={handlePromotePhase}
+                    style={{ marginTop: '16px', width: '100%', background: 'linear-gradient(135deg, var(--tertiary), var(--primary))' }}
+                  >
+                    Promote to Next Phase
+                  </button>
+                )}
               </div>
-            </div>
+            )}
           </section>
         </aside>
       </div>

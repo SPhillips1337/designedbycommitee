@@ -32,9 +32,10 @@ wss.on('connection', (ws) => {
   
   // Get active AI members to display in UI
   const aiMembers = aiManager.getActiveMembers();
+  const projectStore = require('./memory/projectStore');
   
   // Send initial state
-  ws.send(JSON.stringify({ type: 'init', state: designState, messages, aiMembers }));
+  ws.send(JSON.stringify({ type: 'init', state: designState, messages, aiMembers, projects: projectStore.getAllProjects() }));
 
   ws.on('message', (message) => {
     try {
@@ -78,6 +79,50 @@ wss.on('connection', (ws) => {
           // Trigger the LLM committee to respond!
           aiManager.handleCommitteeChat(data.text, data.userId);
           break;
+
+        case 'create_project': {
+          const projectStore = require('./memory/projectStore');
+          const newProject = projectStore.createProject(data.name);
+          broadcast({ type: 'project_updated', project: newProject, projects: projectStore.getAllProjects() });
+          const projMsg = { id: Date.now(), sender: 'System', action: 'created project', detail: newProject.name, type: 'system' };
+          messages.push(projMsg);
+          broadcast({ type: 'new_message', message: projMsg });
+          aiManager.handleCommitteeChat(`I just created a new project called "${newProject.name}". What should our requirements be?`, data.userId);
+          break;
+        }
+
+        case 'add_project_item': {
+          const projectStore = require('./memory/projectStore');
+          const updatedProj = projectStore.addItem(data.projectId, data.phase, data.text);
+          if (updatedProj) {
+            broadcast({ type: 'project_updated', project: updatedProj, projects: projectStore.getAllProjects() });
+          }
+          break;
+        }
+
+        case 'sign_off_item': {
+          const projectStore = require('./memory/projectStore');
+          const updatedProj = projectStore.signOffItem(data.projectId, data.phase, data.itemId);
+          if (updatedProj) {
+            broadcast({ type: 'project_updated', project: updatedProj, projects: projectStore.getAllProjects() });
+          }
+          break;
+        }
+
+        case 'promote_phase': {
+          const projectStore = require('./memory/projectStore');
+          const updatedProj = projectStore.promotePhase(data.projectId);
+          if (updatedProj) {
+            broadcast({ type: 'project_updated', project: updatedProj, projects: projectStore.getAllProjects() });
+            
+            const msg = { id: Date.now(), sender: 'System', action: 'promoted project phase to', detail: updatedProj.status, type: 'system' };
+            messages.push(msg);
+            broadcast({ type: 'new_message', message: msg });
+            
+            aiManager.handleCommitteeChat(`The project "${updatedProj.name}" was promoted to the ${updatedProj.status} phase. What are our next steps?`, data.userId);
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('Error processing message', err);
