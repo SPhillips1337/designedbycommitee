@@ -1,62 +1,104 @@
 # Usage Guide: DesignedByCommittee
 
-This guide explains how to start and interact with the DesignedByCommittee platform.
-
 ## Prerequisites
-- Node.js (v18+)
-- npm or yarn
 
-## Setup
+- Node.js v18+
+- npm
+- At least one LLM provider configured (see below)
+- `opencode` CLI installed if you want automated code execution (`USE_OPENCODE_CLI=true`)
 
-1. **Install Frontend Dependencies:**
-   ```bash
-   npm install
-   ```
+## Installation
 
-2. **Install Backend Dependencies:**
-   ```bash
-   cd server
-   npm install
-   ```
+```bash
+# 1. Frontend dependencies (project root)
+npm install
 
-3. **Environment Variables:**
-   Copy the example environment file and customize it if necessary:
-   ```bash
-   cp .env.example .env
-   ```
+# 2. Backend dependencies
+cd server && npm install
+```
+
+## Environment Configuration
+
+The `.env` file lives at the **project root** (not inside `server/`). Copy the example and fill in your credentials:
+
+```bash
+cp .env.example .env
+```
+
+Key variables:
+
+| Variable | Purpose |
+|---|---|
+| `ACTIVE_LLM_PROVIDER` | Default provider for synthesis/review (e.g. `openai`, `anthropic`, `gemini`) |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI provider. Note: reasoning models (o1, o3, o4-mini, gpt-5-*) do not support custom temperature — the platform handles this automatically. |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Anthropic provider. Use a current model ID (e.g. `claude-sonnet-4-6`). |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Google Gemini provider. |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | OpenRouter provider. |
+| `LOCAL_LLM_API_BASE` / `LOCAL_LLM_MODEL` | LM Studio or any OpenAI-compatible local server. |
+| `REMOTE_LLM_API_BASE` / `REMOTE_LLM_MODEL` | Remote Ollama or OpenAI-compatible endpoint. |
+| `USE_OPENCODE_CLI` | Set `true` to enable the OpenCode CLI worker agent. |
+| `USE_GEMINI_CLI` | Set `true` to enable the Gemini CLI agent. |
+
+Providers are enabled dynamically: if the env var for a provider is present, its agent joins the committee automatically — no code changes needed.
 
 ## Running the Application
 
-You will need two terminal windows to run both the frontend and the backend orchestrator.
+Open two terminal windows.
 
-### 1. Start the Backend Orchestrator
-The Node.js server handles the WebSocket connections, real-time sync, and the Manager Agent logic.
+### Terminal 1 — Backend
+
 ```bash
 cd server
 node index.js
+# Expected: "Server is running on port 4002"
 ```
-*Expected Output: `Server is running on port 4002`*
 
-### 2. Start the Frontend Application
-The Vite development server hosts the React application.
+### Terminal 2 — Frontend
+
 ```bash
-# From the project root
 npm run dev
+# Expected: Vite local URL, typically http://localhost:5173
 ```
-*Expected Output: A local server URL (e.g., `http://localhost:5173`)*
 
-## Interacting with the Platform
+## Using the Platform
 
-1. **Open the Dashboard**: Navigate to the Vite local server URL in your browser.
-2. **Observe Sync**: The "Live Sync" indicator in the top right will glow green when connected to the Node.js backend.
-3. **Vote and Tweak**: Use the sliders and color buttons in the "Live Voting" widget to adjust design tokens. 
-4. **Agent Feedback**: When you change tokens, the `ManagerAgent` intercepts these updates. If you attempt an invalid action (e.g., setting the Primary color to the Error token `#FF6E84`), the `designValidator` skill will block it and broadcast a system warning in the Committee Feed.
+### Starting a Project
 
-## Architecture Overview
-- **Frontend**: React + Vite using CSS variables mapped to the "Luminous Obsidian" design system.
-- **Backend**: Node.js WebSocket server (`server/index.js`).
-- **Agent Stack**: Located in `server/agent-stack/`. Features a decoupled `ManagerAgent` and individual `skills` for evaluating design choices.
-- **LLM Providers**: The system supports multiple backends (configured in `.env`):
-  - **Local/Remote**: OpenAI-compatible (LM Studio, Ollama).
-  - **Cloud APIs**: Native support for Gemini, OpenAI, OpenRouter, and Anthropic.
-  - **Local CLIs**: Support for running `gemini` or `opencode` CLI tools directly.
+1. Open `http://localhost:5173` in your browser.
+2. Click **New Project** and give it a name.
+3. The committee immediately begins a 12-second kickoff discussion.
+
+### Pipeline Phases
+
+The project moves through four phases automatically:
+
+| Phase | What happens |
+|---|---|
+| **Requirements** | Agents debate and synthesise requirement items every 5 messages. |
+| **Tasks** | Each approved requirement is broken into technical tasks. |
+| **Todos** | Tasks are broken into atomic, executable todo items. |
+| **Execution** | OpenCode CLI picks up todos, executes them in the project directory, and a peer agent reviews the output. |
+
+Each item requires:
+- **AI approval** — ≥50% of active non-OpenCode agents must approve (via peer review).
+- **Your sign-off** — click the tick next to each item in the dashboard.
+
+Once every item in a phase is both AI-approved and signed off, the project auto-promotes to the next phase.
+
+### Chat
+
+Type in the committee feed to guide the debate. Your message is broadcast to all agents; each agent has a 60% chance of triggering an AI-to-AI follow-up response (depth-limited to 2 hops).
+
+### Project Isolation
+
+All generated files land in `server/projects/YYYYMMDD-HHMMSS-slug/`. The OpenCode agent is instructed to write only within this directory. Projects persist across server restarts via `server/projects/store.json`.
+
+## Troubleshooting
+
+**Temperature errors from OpenAI** — newer OpenAI models (gpt-5-*, o-series) only accept default temperature. The platform omits the temperature parameter automatically.
+
+**Agent not appearing in committee** — check that the env var for that provider is set and the server has been restarted.
+
+**OpenCode not executing todos** — ensure `USE_OPENCODE_CLI=true` is set and the `opencode` CLI is on your `$PATH`. Check the server log for `[LLM-OpenCode]` messages.
+
+**MCP transport closed** — the Better-OpenCodeMCP bridge reconnects automatically on the next todo execution cycle.

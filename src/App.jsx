@@ -88,6 +88,16 @@ function App() {
     };
   }, [userId]);
 
+  // Expose debug helpers to the browser console as window.dbc
+  useEffect(() => {
+    const api = 'http://localhost:4002';
+    window.dbc = {
+      synthesize: (projectId) => fetch(`${api}/debug/synthesize/${projectId || activeProjectId}`, { method: 'POST' }).then(r => r.json()).then(console.log),
+      projects:   ()           => fetch(`${api}/debug/projects`).then(r => r.json()).then(console.table),
+      chat:       (text, pid)  => fetch(`${api}/debug/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, projectId: pid || activeProjectId }) }).then(r => r.json()).then(console.log),
+    };
+  }, [activeProjectId]);
+
   const updateDesign = (changes) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
@@ -103,7 +113,8 @@ function App() {
       socketRef.current.send(JSON.stringify({
         type: 'chat',
         userId,
-        text: comment
+        text: comment,
+        projectId: activeProjectId || null,
       }));
       setComment('');
     }
@@ -161,6 +172,16 @@ function App() {
     if (activeProjectId && socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'promote_phase',
+        userId,
+        projectId: activeProjectId
+      }));
+    }
+  };
+
+  const handleKickoff = () => {
+    if (activeProjectId && socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'kickoff_project',
         userId,
         projectId: activeProjectId
       }));
@@ -230,30 +251,34 @@ function App() {
         <h2>DesignedByCommittee</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {aiMembers.map(member => (
-              <div key={member.id} title={member.name} style={{
-                height: '32px', 
+            {aiMembers.map((member, idx) => (
+              <div key={member.id} title={member.name} className="ai-badge-live" style={{
+                height: '32px',
                 padding: '0 12px',
-                borderRadius: 'var(--radius-full)', 
+                borderRadius: 'var(--radius-full)',
                 backgroundColor: 'var(--surface-container-low)',
                 border: '1px solid var(--tertiary)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '0.75rem', fontWeight: 'bold',
-                color: 'var(--tertiary)'
+                color: 'var(--tertiary)',
+                animationDelay: `${idx * 0.6}s`,
               }}>
                 {member.name}
               </div>
             ))}
           </div>
-          <div style={{ 
-            display: 'flex', alignItems: 'center', gap: '8px', 
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
             color: isConnected ? 'var(--tertiary)' : 'var(--on-surface-variant)',
             fontSize: '0.9rem'
           }}>
-            <div style={{ 
-              width: '8px', height: '8px', borderRadius: '50%', 
-              backgroundColor: isConnected ? 'var(--tertiary)' : 'var(--error)' 
-            }}></div>
+            <div
+              className={isConnected ? 'status-dot-live' : undefined}
+              style={{
+                width: '8px', height: '8px', borderRadius: '50%',
+                backgroundColor: isConnected ? 'var(--tertiary)' : 'var(--error)'
+              }}
+            />
             {isConnected ? 'Live Sync' : 'Disconnected'}
           </div>
           <button 
@@ -280,7 +305,7 @@ function App() {
           <h3 style={{ marginTop: 0, marginBottom: '24px' }}>Committee Debate Feed</h3>
           <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px', paddingRight: '8px' }}>
             <ul className="no-line-list">
-              {messages.map(msg => (
+              {[...messages].reverse().map(msg => (
                 <li key={msg.id} style={{ 
                   backgroundColor: 'var(--surface-container-low)', 
                   padding: '16px', 
@@ -332,9 +357,9 @@ function App() {
 
             {projects.length > 0 && (
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)' }}>Active Project:</span>
-                <select 
-                  value={activeProjectId || ''} 
+                <span style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' }}>Active Project:</span>
+                <select
+                  value={activeProjectId || ''}
                   onChange={(e) => {
                     setActiveProjectId(e.target.value);
                     setActiveTab(projects.find(p => p.id === e.target.value)?.status || 'requirements');
@@ -346,6 +371,15 @@ function App() {
                     <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
                   ))}
                 </select>
+                <button
+                  className="btn-primary"
+                  onClick={handleKickoff}
+                  disabled={!activeProjectId || activeProject?.status === 'completed'}
+                  title="Tell the committee to start working on this project"
+                  style={{ padding: '8px 14px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                >
+                  GO
+                </button>
               </div>
             )}
 
@@ -375,28 +409,53 @@ function App() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {activeProject[activeTab].map(item => (
-                    <div key={item.id} style={{ 
-                      display: 'flex', alignItems: 'center', gap: '12px', 
-                      padding: '12px', 
-                      backgroundColor: 'var(--surface-container-low)', 
-                      borderRadius: 'var(--radius-sm)'
+                    <div key={item.id} style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '12px',
+                      backgroundColor: 'var(--surface-container-low)',
+                      borderRadius: 'var(--radius-sm)',
+                      borderLeft: item.aiApproved
+                        ? '3px solid var(--tertiary)'
+                        : (item.aiApprovals && item.aiApprovals.length > 0)
+                          ? '3px solid var(--primary-dim)'
+                          : '3px solid transparent',
                     }}>
-                      <input 
-                        type="checkbox" 
-                        checked={item.signedOff} 
+                      <input
+                        type="checkbox"
+                        checked={item.signedOff}
                         onChange={() => handleSignOff(activeTab, item.id)}
                         style={{ width: '18px', height: '18px', accentColor: 'var(--primary)' }}
                       />
-                      <span style={{ 
-                        flex: 1, 
+                      <span style={{
+                        flex: 1,
                         fontSize: '0.9rem',
                         textDecoration: item.signedOff ? 'line-through' : 'none',
                         color: item.signedOff ? 'var(--on-surface-variant)' : 'var(--on-surface)'
                       }}>
                         {item.text}
                       </span>
-                      {activeTab === 'todos' && (
+                      {activeTab === 'todos' && item.status && (
                         <span style={{ fontSize: '0.7rem', color: 'var(--tertiary)' }}>[{item.status}]</span>
+                      )}
+                      {activeTab !== 'todos' && item.aiApproved && (
+                        <span title="AI consensus reached" style={{
+                          fontSize: '0.65rem', fontWeight: 'bold',
+                          color: 'var(--tertiary)',
+                          border: '1px solid var(--tertiary)',
+                          borderRadius: 'var(--radius-full)',
+                          padding: '2px 6px',
+                          whiteSpace: 'nowrap',
+                        }}>AI ✓</span>
+                      )}
+                      {activeTab !== 'todos' && !item.aiApproved && item.aiApprovals && item.aiApprovals.length > 0 && (
+                        <span title={`Approved by: ${item.aiApprovals.join(', ')}`} style={{
+                          fontSize: '0.65rem',
+                          color: 'var(--on-surface-variant)',
+                          border: '1px solid var(--outline-variant)',
+                          borderRadius: 'var(--radius-full)',
+                          padding: '2px 6px',
+                          whiteSpace: 'nowrap',
+                        }}>AI {item.aiApprovals.length}</span>
                       )}
                     </div>
                   ))}

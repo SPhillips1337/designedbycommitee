@@ -66,18 +66,16 @@ wss.on('connection', (ws) => {
           break;
 
         case 'chat':
-          const chatMsg = { 
-            id: Date.now(), 
-            sender: data.userId || 'User', 
-            action: 'says', 
+          const chatMsg = {
+            id: Date.now(),
+            sender: data.userId || 'User',
+            action: 'says',
             detail: data.text,
             type: 'comment'
           };
           messages.push(chatMsg);
           broadcast({ type: 'new_message', message: chatMsg });
-          
-          // Trigger the LLM committee to respond!
-          aiManager.handleCommitteeChat(data.text, data.userId);
+          aiManager.handleCommitteeChat(data.text, data.userId, data.projectId || null);
           break;
 
         case 'create_project': {
@@ -87,7 +85,9 @@ wss.on('connection', (ws) => {
           const projMsg = { id: Date.now(), sender: 'System', action: 'created project', detail: newProject.name, type: 'system' };
           messages.push(projMsg);
           broadcast({ type: 'new_message', message: projMsg });
-          aiManager.handleCommitteeChat(`I just created a new project called "${newProject.name}". What should our requirements be?`, data.userId);
+          aiManager.handleCommitteeChat(`I just created a new project called "${newProject.name}". What should our requirements be?`, data.userId, newProject.id);
+          // Give the committee 12 seconds to discuss, then start drafting requirements
+          setTimeout(() => aiManager.synthesizeDraftItem(newProject.id), 12000);
           break;
         }
 
@@ -105,7 +105,27 @@ wss.on('connection', (ws) => {
           const updatedProj = projectStore.signOffItem(data.projectId, data.phase, data.itemId);
           if (updatedProj) {
             broadcast({ type: 'project_updated', project: updatedProj, projects: projectStore.getAllProjects() });
+            // Check if all items are now approved+signed-off and we should auto-promote
+            aiManager.checkAutoPromote(data.projectId);
           }
+          break;
+        }
+
+        case 'kickoff_project': {
+          const projectStore = require('./memory/projectStore');
+          console.log('[kickoff] received for projectId:', data.projectId);
+          const project = projectStore.getProject(data.projectId);
+          console.log('[kickoff] project found:', project?.name, '| status:', project?.status);
+          if (!project || project.status === 'completed') break;
+          const kickoffMsg = { id: Date.now(), sender: 'System', action: 'kicked off project', detail: project.name, type: 'system' };
+          messages.push(kickoffMsg);
+          broadcast({ type: 'new_message', message: kickoffMsg });
+          aiManager.handleCommitteeChat(
+            `Let's get to work on "${project.name}". We're currently in the ${project.status} phase. Please begin.`,
+            data.userId,
+            data.projectId
+          );
+          setTimeout(() => aiManager.synthesizeDraftItem(data.projectId), 5000);
           break;
         }
 
@@ -119,7 +139,9 @@ wss.on('connection', (ws) => {
             messages.push(msg);
             broadcast({ type: 'new_message', message: msg });
             
-            aiManager.handleCommitteeChat(`The project "${updatedProj.name}" was promoted to the ${updatedProj.status} phase. What are our next steps?`, data.userId);
+            aiManager.handleCommitteeChat(`The project "${updatedProj.name}" was promoted to the ${updatedProj.status} phase. What are our next steps?`, data.userId, updatedProj.id);
+          // Give the committee 10 seconds to discuss the new phase, then start drafting
+          setTimeout(() => aiManager.synthesizeDraftItem(updatedProj.id), 10000);
           }
           break;
         }
@@ -145,6 +167,30 @@ function broadcast(data) {
 
 wss.on('error', (err) => {
   console.error('WebSocket Server Error:', err);
+});
+
+// ─── Debug REST endpoints ─────────────────────────────────────────────────────
+// Available from the browser console: fetch('http://localhost:4002/debug/...')
+
+app.get('/debug/projects', (req, res) => {
+  const projectStore = require('./memory/projectStore');
+  res.json(projectStore.getAllProjects());
+});
+
+app.post('/debug/synthesize/:projectId', (req, res) => {
+  const { projectId } = req.params;
+  const projectStore = require('./memory/projectStore');
+  const project = projectStore.getProject(projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  aiManager.synthesizeDraftItem(projectId);
+  res.json({ ok: true, project: project.name, phase: project.status });
+});
+
+app.post('/debug/chat', (req, res) => {
+  const { text, projectId } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  aiManager.handleCommitteeChat(text, 'Debug', projectId || null);
+  res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 4002;

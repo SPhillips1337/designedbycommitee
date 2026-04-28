@@ -1,13 +1,38 @@
 const fs = require('fs');
 const path = require('path');
 
+const STORE_FILE = path.resolve(__dirname, '../projects/store.json');
+
 class ProjectStore {
   constructor() {
     this.projects = {};
     this.baseProjectsDir = path.resolve(__dirname, '../projects');
-    
+
     if (!fs.existsSync(this.baseProjectsDir)) {
       fs.mkdirSync(this.baseProjectsDir, { recursive: true });
+    }
+
+    this._loadFromDisk();
+  }
+
+  _loadFromDisk() {
+    try {
+      if (fs.existsSync(STORE_FILE)) {
+        const raw = fs.readFileSync(STORE_FILE, 'utf8');
+        this.projects = JSON.parse(raw);
+        console.log(`[ProjectStore] Loaded ${Object.keys(this.projects).length} project(s) from disk.`);
+      }
+    } catch (err) {
+      console.error('[ProjectStore] Failed to load from disk:', err.message);
+      this.projects = {};
+    }
+  }
+
+  _saveToDisk() {
+    try {
+      fs.writeFileSync(STORE_FILE, JSON.stringify(this.projects, null, 2));
+    } catch (err) {
+      console.error('[ProjectStore] Failed to save to disk:', err.message);
     }
   }
 
@@ -16,7 +41,7 @@ class ProjectStore {
     const safeName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const dirName = `${timestamp}-${safeName}`;
     const projectDir = path.join(this.baseProjectsDir, dirName);
-    
+
     if (!fs.existsSync(projectDir)) {
       fs.mkdirSync(projectDir, { recursive: true });
     }
@@ -25,7 +50,7 @@ class ProjectStore {
     const newProject = {
       id: projectId,
       name,
-      status: 'requirements', // requirements, tasks, todos, completed
+      status: 'requirements',
       directory: projectDir,
       requirements: [],
       tasks: [],
@@ -33,6 +58,7 @@ class ProjectStore {
     };
 
     this.projects[projectId] = newProject;
+    this._saveToDisk();
     return newProject;
   }
 
@@ -46,24 +72,50 @@ class ProjectStore {
 
   addItem(projectId, phase, text) {
     const project = this.projects[projectId];
-    if (!project) return null;
-
-    // phase should be one of 'requirements', 'tasks', 'todos'
-    if (!project[phase]) return null;
+    if (!project || !project[phase]) return null;
 
     const newItem = {
       id: `item_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       text,
       signedOff: false,
+      aiApprovals: [],
+      aiApproved: false,
     };
 
     if (phase === 'todos') {
-      newItem.status = 'pending'; // pending, locked, done
+      newItem.status = 'pending';
       newItem.lockedBy = null;
       newItem.output = null;
     }
 
     project[phase].push(newItem);
+    this._saveToDisk();
+    return project;
+  }
+
+  approveItem(projectId, phase, itemId, agentName) {
+    const project = this.projects[projectId];
+    if (!project || !project[phase]) return null;
+
+    const item = project[phase].find(i => i.id === itemId);
+    if (item && !item.aiApprovals.includes(agentName)) {
+      item.aiApprovals.push(agentName);
+      this._saveToDisk();
+    }
+    return project;
+  }
+
+  reviseItem(projectId, phase, itemId, newText) {
+    const project = this.projects[projectId];
+    if (!project || !project[phase]) return null;
+
+    const item = project[phase].find(i => i.id === itemId);
+    if (item) {
+      item.text = newText;
+      item.aiApprovals = []; // Reset approvals on revision
+      item.aiApproved = false;
+      this._saveToDisk();
+    }
     return project;
   }
 
@@ -73,8 +125,9 @@ class ProjectStore {
 
     const item = project[phase].find(i => i.id === itemId);
     if (item) {
-      item.signedOff = !item.signedOff; // toggle
+      item.signedOff = !item.signedOff;
     }
+    this._saveToDisk();
     return project;
   }
 
@@ -89,6 +142,7 @@ class ProjectStore {
     } else if (project.status === 'todos') {
       project.status = 'completed';
     }
+    this._saveToDisk();
     return project;
   }
 
@@ -100,6 +154,7 @@ class ProjectStore {
     if (todo && todo.status === 'pending') {
       todo.status = 'locked';
       todo.lockedBy = agentName;
+      this._saveToDisk();
       return true;
     }
     return false;
@@ -113,13 +168,13 @@ class ProjectStore {
     if (todo && todo.status === 'locked') {
       todo.status = 'done';
       todo.output = output;
-      todo.signedOff = false; // Requires review sign-off
+      todo.signedOff = false;
+      this._saveToDisk();
       return true;
     }
     return false;
   }
 }
 
-// Singleton pattern
 const store = new ProjectStore();
 module.exports = store;
