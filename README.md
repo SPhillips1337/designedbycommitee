@@ -43,12 +43,30 @@ Providers are enabled by which env vars are present — no code changes needed t
 
 ## Getting Started
 
-1. Configure `.env` in the project root (copy from `.env.example`, add your keys).
-2. Install dependencies: `npm install` then `cd server && npm install`.
-3. Start the backend: `cd server && node index.js`
-4. Start the frontend: `npm run dev` (from project root)
+### One-line install (Ubuntu / WSL2)
 
-See [USAGE.md](./USAGE.md) for full setup details and [AGENTS.md](./AGENTS.md) for agent roles.
+```bash
+curl -fsSL https://raw.githubusercontent.com/SPhillips1337/designedbycommitee/main/install.sh | bash
+```
+
+The installer will:
+- Check/install Node.js 18+ via nvm
+- Clone the repo to a directory of your choice
+- Clone and build the Better-OpenCodeMCP tool
+- Install all dependencies
+- Walk you through configuring your LLM providers interactively
+- Generate a `start.sh` convenience launcher
+
+### Manual setup
+
+1. Clone the repo and enter it.
+2. Copy `.env.example` to `.env` in the project root and add your API keys.
+3. Install dependencies: `npm install` then `cd server && npm install`.
+4. Build the MCP bridge: `cd server/tools/Better-OpenCodeMCP && npm install && npm run build`
+5. Start the backend: `node server/index.js`
+6. Start the frontend: `npm run dev` (from project root)
+
+Or use the generated launcher after running the installer: `./start.sh`
 
 ## License
 MIT

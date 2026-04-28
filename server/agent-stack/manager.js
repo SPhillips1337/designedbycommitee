@@ -61,6 +61,13 @@ Provide a 1-2 sentence review of this completion.`;
         }
 
         await this.checkAutoPromote(project.id);
+
+        // Generate the next todo after execution completes, since synthesizeTodoItems
+        // only produces one at a time and won't re-trigger unless chat is active.
+        const refreshedProject = projectStore.getProject(project.id);
+        if (refreshedProject && refreshedProject.status === 'todos') {
+          setTimeout(() => this.synthesizeTodoItems(project.id), 3000);
+        }
       } catch (err) {
         console.error(`Error executing todo with ${openCodeMember.name}:`, err);
         this.broadcastMessage('System', `error executing todo`, err.message, 'system');
@@ -443,6 +450,12 @@ REVISE: <improved text> REASON: <why>`;
         projectId
       );
     }, 1500);
+
+    // Kick off todo generation immediately on entering todos phase without
+    // waiting for the debate cycle to accumulate enough messages.
+    if (updatedProject.status === 'todos') {
+      setTimeout(() => this.synthesizeTodoItems(projectId), 5000);
+    }
   }
 
   // ─── Design validation (existing feature) ───────────────────────────────────

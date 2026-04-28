@@ -213,8 +213,9 @@ async function callOpenCodeMCP(systemPrompt, userPrompt) {
     let isDone = false;
     let finalResult = null;
     let attempts = 0;
+    const maxAttempts = parseInt(process.env.OPENCODE_TIMEOUT_ATTEMPTS || '150', 10); // default 5 min
 
-    while (!isDone && attempts < 30) {
+    while (!isDone && attempts < maxAttempts) {
       await new Promise(r => setTimeout(r, 2000));
       attempts++;
 
@@ -241,7 +242,7 @@ async function callOpenCodeMCP(systemPrompt, userPrompt) {
       }
     }
 
-    return finalResult || `[OpenCode] Task ${taskId} timed out after 60s.`;
+    return finalResult || `[OpenCode] Task ${taskId} timed out after ${maxAttempts * 2}s.`;
   } catch (err) {
     // Invalidate the singleton so a fresh connection is attempted next time.
     _mcpClient = null;
