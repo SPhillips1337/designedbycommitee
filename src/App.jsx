@@ -35,7 +35,14 @@ function App() {
       };
 
       socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err);
+          return;
+        }
+
         if (data.type === 'init') {
           setBorderRadius(data.state.borderRadius);
           setPrimaryColor(data.state.primaryColor);
