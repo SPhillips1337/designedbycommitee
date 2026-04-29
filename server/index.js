@@ -194,6 +194,10 @@ app.post('/debug/chat', (req, res) => {
 });
 
 const PORT = process.env.PORT || 4002;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT} (0.0.0.0)`);
+const projectStore = require('./memory/projectStore');
+
+projectStore.ready.then(() => {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT} (0.0.0.0)`);
+  });
 });

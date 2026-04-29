@@ -7,18 +7,19 @@ class ProjectStore {
   constructor() {
     this.projects = {};
     this.baseProjectsDir = path.resolve(__dirname, '../projects');
+    this.writeQueue = Promise.resolve();
 
     if (!fs.existsSync(this.baseProjectsDir)) {
       fs.mkdirSync(this.baseProjectsDir, { recursive: true });
     }
 
-    this._loadFromDisk();
+    this.ready = this._loadFromDisk();
   }
 
-  _loadFromDisk() {
+  async _loadFromDisk() {
     try {
       if (fs.existsSync(STORE_FILE)) {
-        const raw = fs.readFileSync(STORE_FILE, 'utf8');
+        const raw = await fs.promises.readFile(STORE_FILE, 'utf8');
         this.projects = JSON.parse(raw);
         console.log(`[ProjectStore] Loaded ${Object.keys(this.projects).length} project(s) from disk.`);
       }
@@ -28,12 +29,19 @@ class ProjectStore {
     }
   }
 
-  _saveToDisk() {
-    try {
-      fs.writeFileSync(STORE_FILE, JSON.stringify(this.projects, null, 2));
-    } catch (err) {
-      console.error('[ProjectStore] Failed to save to disk:', err.message);
-    }
+  async _saveToDisk() {
+    // Capture state synchronously to ensure what we write matches the state when _saveToDisk was called
+    const data = JSON.stringify(this.projects, null, 2);
+
+    this.writeQueue = this.writeQueue.then(async () => {
+      try {
+        await fs.promises.writeFile(STORE_FILE, data);
+      } catch (err) {
+        console.error('[ProjectStore] Failed to save to disk:', err.message);
+      }
+    });
+
+    return this.writeQueue;
   }
 
   createProject(name) {
