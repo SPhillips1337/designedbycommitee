@@ -7,33 +7,53 @@ class ProjectStore {
   constructor() {
     this.projects = {};
     this.baseProjectsDir = path.resolve(__dirname, '../projects');
+    this.writeQueue = Promise.resolve();
 
-    if (!fs.existsSync(this.baseProjectsDir)) {
-      fs.mkdirSync(this.baseProjectsDir, { recursive: true });
-    }
-
-    this._loadFromDisk();
+    // Initialize async - create directory and load from disk
+    this.ready = this._initialize();
   }
 
-  _loadFromDisk() {
+  async _initialize() {
+    // Use async mkdir to avoid mixing sync/async (fixes race condition)
     try {
-      if (fs.existsSync(STORE_FILE)) {
-        const raw = fs.readFileSync(STORE_FILE, 'utf8');
-        this.projects = JSON.parse(raw);
-        console.log(`[ProjectStore] Loaded ${Object.keys(this.projects).length} project(s) from disk.`);
+      await fs.promises.mkdir(this.baseProjectsDir, { recursive: true });
+    } catch (err) {
+      // Directory might already exist, which is fine
+      if (err.code !== 'EEXIST') {
+        console.error('[ProjectStore] Failed to create directory:', err.message);
       }
+    }
+    await this._loadFromDisk();
+  }
+
+  async _loadFromDisk() {
+    try {
+      const raw = await fs.promises.readFile(STORE_FILE, 'utf8');
+      this.projects = JSON.parse(raw);
+      console.log(`[ProjectStore] Loaded ${Object.keys(this.projects).length} project(s) from disk.`);
     } catch (err) {
-      console.error('[ProjectStore] Failed to load from disk:', err.message);
-      this.projects = {};
+      if (err.code === 'ENOENT') {
+        // File doesn't exist yet - that's okay
+        this.projects = {};
+      } else {
+        console.error('[ProjectStore] Failed to load from disk:', err.message);
+        this.projects = {};
+      }
     }
   }
 
-  _saveToDisk() {
-    try {
-      fs.writeFileSync(STORE_FILE, JSON.stringify(this.projects, null, 2));
-    } catch (err) {
-      console.error('[ProjectStore] Failed to save to disk:', err.message);
-    }
+  async _saveToDisk() {
+    // Capture state inside the queue to ensure we write the latest state (fixes data loss risk)
+    this.writeQueue = this.writeQueue.then(async () => {
+      try {
+        const data = JSON.stringify(this.projects, null, 2);
+        await fs.promises.writeFile(STORE_FILE, data);
+      } catch (err) {
+        console.error('[ProjectStore] Failed to save to disk:', err.message);
+      }
+    });
+
+    return this.writeQueue;
   }
 
   createProject(name) {

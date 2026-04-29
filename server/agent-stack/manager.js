@@ -18,6 +18,7 @@ class ManagerAgent {
 
   async processPendingTodos() {
     const projectStore = require('../memory/projectStore');
+    await projectStore.ready;
     const projects = projectStore.getAllProjects();
     const members = this.getActiveMembers();
     const openCodeMember = members.find(m => m.id === 'opencode-cli');
@@ -82,6 +83,8 @@ Provide a 1-2 sentence review of this completion.`;
   // ─── Committee chat ─────────────────────────────────────────────────────────
 
   async handleCommitteeChat(text, senderId, projectId = null, depth = 0) {
+    const projectStore = require('../memory/projectStore');
+    await projectStore.ready;
     const members = this.getActiveMembers();
 
     this.chatHistory.push({ sender: senderId, text });
@@ -321,7 +324,7 @@ If this task is fully covered by existing todos, respond with: COMPLETE`;
       projectStore.approveItem(projectId, phase, item.id, proposerName);
       const proj = projectStore.getProject(projectId);
       const it = proj && proj[phase] && proj[phase].find(i => i.id === item.id);
-      if (it) { it.aiApproved = true; projectStore._saveToDisk(); this.broadcastStateUpdate(); }
+      if (it) { it.aiApproved = true; await projectStore._saveToDisk(); this.broadcastStateUpdate(); }
       await this.checkAutoPromote(projectId);
       return;
     }
@@ -406,7 +409,7 @@ REVISE: <improved text> REASON: <why>`;
 
     if (approvalCount >= Math.ceil(activeAI.length / 2)) {
       item.aiApproved = true;
-      projectStore._saveToDisk();
+      await projectStore._saveToDisk();
       this.broadcastMessage('System', 'AI consensus reached on', item.text, 'system');
       this.broadcastStateUpdate();
       await this.checkAutoPromote(projectId);
