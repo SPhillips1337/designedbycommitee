@@ -1,6 +1,7 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
+const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -8,6 +9,7 @@ const cors = require('cors');
 const ManagerAgent = require('./agent-stack/manager');
 
 const app = express();
+app.set('trust proxy', true); // Required for accurate req.ip behind reverse proxies
 app.use(cors());
 app.use(express.json());
 
@@ -171,6 +173,43 @@ wss.on('error', (err) => {
 
 // ─── Debug REST endpoints ─────────────────────────────────────────────────────
 // Available from the browser console: fetch('http://localhost:4002/debug/...')
+
+const debugAuth = (req, res, next) => {
+  const apiKey = process.env.DEBUG_API_KEY;
+  const requestKey = req.headers['x-debug-key'];
+
+  // 1. If API key is configured, use timing-safe comparison
+  if (apiKey) {
+    try {
+      if (requestKey && crypto.timingSafeEqual(Buffer.from(requestKey), Buffer.from(apiKey))) {
+        return next();
+      }
+    } catch (err) {
+      // Invalid key length or comparison failed - fall through to loopback check
+    }
+  }
+
+  // 2. Otherwise, check if it's a loopback interface
+  // Note: req.ip relies on 'trust proxy' being set for correct IP behind reverse proxies
+  const remoteAddress = req.ip || req.socket.remoteAddress;
+  const isLoopback =
+    remoteAddress === '127.0.0.1' ||
+    remoteAddress === '::1' ||
+    remoteAddress === '::ffff:127.0.0.1';
+
+  if (isLoopback) {
+    return next();
+  }
+
+  // 3. Deny access
+  console.warn(`[Security] Blocked unauthorized debug access attempt from ${remoteAddress}`);
+  return res.status(403).json({
+    error: 'Forbidden',
+    message: 'Debug endpoints are restricted to loopback interfaces or require a valid DEBUG_API_KEY.'
+  });
+};
+
+app.use('/debug', debugAuth);
 
 app.get('/debug/projects', (req, res) => {
   const projectStore = require('./memory/projectStore');
