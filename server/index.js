@@ -172,6 +172,37 @@ wss.on('error', (err) => {
 // ─── Debug REST endpoints ─────────────────────────────────────────────────────
 // Available from the browser console: fetch('http://localhost:4002/debug/...')
 
+const debugAuth = (req, res, next) => {
+  const apiKey = process.env.DEBUG_API_KEY;
+  const requestKey = req.headers['x-debug-key'];
+
+  // 1. If API key is configured and matches, allow access
+  if (apiKey && requestKey === apiKey) {
+    return next();
+  }
+
+  // 2. Otherwise, check if it's a loopback interface
+  // Note: req.ip might be '::ffff:127.0.0.1' for IPv4-mapped IPv6 addresses
+  const remoteAddress = req.ip || req.socket.remoteAddress;
+  const isLoopback =
+    remoteAddress === '127.0.0.1' ||
+    remoteAddress === '::1' ||
+    remoteAddress === '::ffff:127.0.0.1';
+
+  if (isLoopback) {
+    return next();
+  }
+
+  // 3. Deny access
+  console.warn(`[Security] Blocked unauthorized debug access attempt from ${remoteAddress}`);
+  return res.status(403).json({
+    error: 'Forbidden',
+    message: 'Debug endpoints are restricted to loopback interfaces or require a valid DEBUG_API_KEY.'
+  });
+};
+
+app.use('/debug', debugAuth);
+
 app.get('/debug/projects', (req, res) => {
   const projectStore = require('./memory/projectStore');
   res.json(projectStore.getAllProjects());
