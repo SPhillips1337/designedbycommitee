@@ -15,4 +15,8 @@ function saveContext(data) {
   }
 }
 
-module.exports = { getContext, saveContext };
+function resetStore() {
+  store.history = [];
+}
+
+module.exports = { getContext, saveContext, resetStore };
